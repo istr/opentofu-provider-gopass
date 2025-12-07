@@ -1,11 +1,12 @@
 # terraform-provider-gopass
 
-OpenTofu/Terraform provider for reading secrets from [gopass](https://github.com/gopasspw/gopass) 
+OpenTofu/Terraform provider for reading secrets from [gopass](https://github.com/gopasspw/gopass)
 as **ephemeral values** - credentials that are never stored in state or plan files.
 
 ## Features
 
 - 🔐 **Ephemeral-only**: Secrets exist only during plan/apply, never persisted
+- 🔗 **Native gopass integration**: Links directly against gopass Go library - no subprocess spawning
 - 🔑 **Hardware token support**: Works with YubiKey, Nitrokey, etc. via GPG
 - 📁 **Two access patterns**:
   - `gopass_secret`: Read single secret by path
@@ -35,8 +36,8 @@ make install
 go build -o terraform-provider-gopass
 
 # Install for OpenTofu
-mkdir -p ~/.local/share/opentofu/plugins/registry.opentofu.org/ingo-struck/gopass/0.1.0/linux_amd64
-cp terraform-provider-gopass ~/.local/share/opentofu/plugins/registry.opentofu.org/ingo-struck/gopass/0.1.0/linux_amd64/
+mkdir -p ~/.local/share/opentofu/plugins/registry.opentofu.org/istr/gopass/0.1.0/linux_amd64
+cp terraform-provider-gopass ~/.local/share/opentofu/plugins/registry.opentofu.org/istr/gopass/0.1.0/linux_amd64/
 ```
 
 ## Usage
@@ -46,20 +47,17 @@ cp terraform-provider-gopass ~/.local/share/opentofu/plugins/registry.opentofu.o
 ```hcl
 terraform {
   required_version = ">= 1.11.0"
-  
+
   required_providers {
     gopass = {
-      source  = "registry.opentofu.org/ingo-struck/gopass"
+      source  = "registry.opentofu.org/istr/gopass"
       version = "~> 0.1"
     }
   }
 }
 
-# Optional configuration
-provider "gopass" {
-  # gopass_binary = "/usr/local/bin/gopass"  # Custom binary path
-  # store         = "work"                    # Non-default store
-}
+# No configuration needed - uses gopass's native config
+provider "gopass" {}
 ```
 
 ### Reading a Credential Set (gopassenv style)
@@ -143,8 +141,11 @@ Reads all secrets under a path as a key-value map.
 │                                                             │
 │  1. OpenTofu calls provider's Open() method                 │
 │                                                             │
-│  2. Provider executes: gopass show -o <path>                │
-│     └── GPG decryption (may require PIN/touch)              │
+│  2. Provider uses gopass Go library directly:               │
+│     ├── api.New(ctx) → initializes store once              │
+│     ├── store.List(ctx) → lists secrets                    │
+│     └── store.Get(ctx, path, "latest") → retrieves secret  │
+│         └── GPG decryption (may require PIN/touch)         │
 │                                                             │
 │  3. Secret returned to OpenTofu in memory only              │
 │     └── Used for provider config, write-only attributes     │
@@ -155,12 +156,46 @@ Reads all secrets under a path as a key-value map.
 └─────────────────────────────────────────────────────────────┘
 ```
 
+### Architecture
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                     OpenTofu/Terraform                      │
+├─────────────────────────────────────────────────────────────┤
+│                    terraform-provider-gopass                │
+│  ┌─────────────────┐  ┌──────────────────────────────────┐  │
+│  │ GopassClient    │  │ Ephemeral Resources              │  │
+│  │                 │  │  - gopass_secret (single value)  │  │
+│  │ • ensureStore() │──│  - gopass_env (key-value map)    │  │
+│  │ • GetSecret()   │  │                                  │  │
+│  │ • GetEnvSecrets │  │ Values exist only in memory      │  │
+│  └────────┬────────┘  └──────────────────────────────────┘  │
+├───────────┼─────────────────────────────────────────────────┤
+│           │           gopass Library (linked)               │
+│           v                                                 │
+│  ┌─────────────────────────────────────────────────────────┐│
+│  │ github.com/gopasspw/gopass/pkg/gopass/api               ││
+│  │  • api.New(ctx) → Store                                 ││
+│  │  • store.List(ctx) → []string                           ││
+│  │  • store.Get(ctx, name, revision) → Secret              ││
+│  │  • secret.Password() → string                           ││
+│  └────────┬────────────────────────────────────────────────┘│
+├───────────┼─────────────────────────────────────────────────┤
+│           v                                                 │
+│  ┌─────────────────────────────────────────────────────────┐│
+│  │                    GPG Agent                            ││
+│  │         (handles hardware token interaction)            ││
+│  └─────────────────────────────────────────────────────────┘│
+└─────────────────────────────────────────────────────────────┘
+```
+
 ## Security Considerations
 
 ### What's Protected
 
 - ✅ Secrets never written to `terraform.tfstate`
 - ✅ Secrets never written to plan files
+- ✅ No subprocess spawning (no secrets in process arguments)
 - ✅ Hardware token provides physical authentication factor
 - ✅ Each operation requires fresh authentication
 
@@ -198,45 +233,27 @@ make fmt
 make lint
 ```
 
-## Testing Without gopass
-
-For CI/testing without actual gopass, you can create a mock:
-
-```bash
-#!/bin/bash
-# ~/bin/gopass-mock
-case "$2" in
-  "show")
-    case "$4" in
-      "env/test/KEY") echo "secret-value" ;;
-      *) echo "mock-secret" ;;
-    esac
-    ;;
-  "list")
-    echo "env/test/KEY"
-    echo "env/test/OTHER"
-    ;;
-esac
-```
-
-Then configure the provider:
-
-```hcl
-provider "gopass" {
-  gopass_binary = "~/bin/gopass-mock"
-}
-```
-
 ## Comparison with Alternatives
 
-| Approach | Secrets in State | Hardware Token | Complexity |
-|----------|-----------------|----------------|------------|
-| **gopass ephemeral** | ❌ No | ✅ Yes | Low |
-| Environment variables | ❌ No | ✅ Yes | Low |
-| Vault data source | ✅ Yes | Via Vault | Medium |
-| External data source | ✅ Yes | ✅ Yes | Medium |
-| SOPS provider | ✅ Yes | Via GPG | Medium |
-| State encryption | ✅ Yes (encrypted) | Via KMS | Medium |
+| Approach | Secrets in State | Subprocess | Hardware Token |
+|----------|-----------------|------------|----------------|
+| **gopass ephemeral (native)** | ❌ No | ❌ No | ✅ Yes |
+| gopass ephemeral (exec) | ❌ No | ✅ Yes | ✅ Yes |
+| Environment variables | ❌ No | N/A | ✅ Yes |
+| Vault data source | ✅ Yes | ❌ No | Via Vault |
+| External data source | ✅ Yes | ✅ Yes | ✅ Yes |
+| SOPS provider | ✅ Yes | ✅ Yes | Via GPG |
+| State encryption | ✅ Yes (encrypted) | N/A | Via KMS |
+
+## API Stability Note
+
+The gopass library includes this warning:
+
+> Feel free to report feedback on API design and missing features but please note that
+> bug reports will be silently ignored and the API WILL CHANGE WITHOUT NOTICE until this note is gone.
+
+This provider may need updates when gopass releases new versions. Pin your gopass
+dependency version in `go.mod` for stability.
 
 ## License
 

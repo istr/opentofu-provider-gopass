@@ -11,7 +11,6 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/provider"
 	"github.com/hashicorp/terraform-plugin-framework/provider/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
-	"github.com/hashicorp/terraform-plugin-framework/types"
 )
 
 // Ensure GopassProvider satisfies various provider interfaces.
@@ -26,12 +25,8 @@ type GopassProvider struct {
 }
 
 // GopassProviderModel describes the provider data model.
-type GopassProviderModel struct {
-	// GopassBinary allows overriding the gopass binary path
-	GopassBinary types.String `tfsdk:"gopass_binary"`
-	// Store allows specifying a non-default gopass store
-	Store types.String `tfsdk:"store"`
-}
+// Currently empty as gopass uses its own configuration.
+type GopassProviderModel struct{}
 
 // New creates a new provider instance.
 func New(version string) func() provider.Provider {
@@ -52,8 +47,10 @@ func (p *GopassProvider) Schema(ctx context.Context, req provider.SchemaRequest,
 		Description: "The gopass provider enables reading secrets from a gopass password store as ephemeral values. " +
 			"Secrets are never stored in Terraform state or plan files.",
 		MarkdownDescription: `
-The gopass provider enables reading secrets from a [gopass](https://github.com/gopasspw/gopass) 
+The gopass provider enables reading secrets from a [gopass](https://github.com/gopasspw/gopass)
 password store as **ephemeral values**.
+
+This provider links directly against the gopass library - no subprocess spawning required.
 
 Ephemeral values are:
 - Only available during plan/apply execution
@@ -62,33 +59,23 @@ Ephemeral values are:
 
 ## Authentication
 
-The provider relies on your existing gopass and GPG configuration. If you use a hardware 
+The provider uses gopass's native configuration and GPG integration. If you use a hardware
 token (YubiKey, Nitrokey), you will be prompted for PIN/touch during each Terraform operation.
 
 ## Example Usage
 
 ` + "```hcl" + `
 # Read credentials as ephemeral values
-ephemeral "gopass_secret" "db_password" {
-  path = "infrastructure/database/password"
+ephemeral "gopass_env" "db" {
+  path = "infrastructure/database"
 }
 
 # Use in provider configuration (ephemeral-aware)
 provider "postgresql" {
-  password = ephemeral.gopass_secret.db_password.value
+  password = ephemeral.gopass_env.db.values["password"]
 }
 ` + "```" + `
 `,
-		Attributes: map[string]schema.Attribute{
-			"gopass_binary": schema.StringAttribute{
-				Description: "Path to gopass binary. Defaults to 'gopass' (found via PATH).",
-				Optional:    true,
-			},
-			"store": schema.StringAttribute{
-				Description: "Name of the gopass store to use. Defaults to the default store.",
-				Optional:    true,
-			},
-		},
 	}
 }
 
@@ -100,23 +87,12 @@ func (p *GopassProvider) Configure(ctx context.Context, req provider.ConfigureRe
 		return
 	}
 
-	// Build provider config to pass to resources
-	providerConfig := &ProviderConfig{
-		GopassBinary: "gopass",
-		Store:        "",
-	}
+	// Create gopass client - uses native gopass library
+	client := NewGopassClient()
 
-	if !config.GopassBinary.IsNull() {
-		providerConfig.GopassBinary = config.GopassBinary.ValueString()
-	}
-
-	if !config.Store.IsNull() {
-		providerConfig.Store = config.Store.ValueString()
-	}
-
-	// Make config available to resources and ephemeral resources
-	resp.DataSourceData = providerConfig
-	resp.ResourceData = providerConfig
+	// Make client available to resources and ephemeral resources
+	resp.DataSourceData = client
+	resp.ResourceData = client
 }
 
 // Resources returns an empty slice - this provider only provides ephemeral resources.
@@ -135,10 +111,4 @@ func (p *GopassProvider) EphemeralResources(ctx context.Context) []func() epheme
 		NewSecretEphemeralResource,
 		NewEnvEphemeralResource,
 	}
-}
-
-// ProviderConfig holds the parsed provider configuration.
-type ProviderConfig struct {
-	GopassBinary string
-	Store        string
 }

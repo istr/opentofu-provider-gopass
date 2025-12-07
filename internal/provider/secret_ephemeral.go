@@ -6,8 +6,6 @@ package provider
 import (
 	"context"
 	"fmt"
-	"os/exec"
-	"strings"
 
 	"github.com/hashicorp/terraform-plugin-framework/ephemeral"
 	"github.com/hashicorp/terraform-plugin-framework/ephemeral/schema"
@@ -20,7 +18,7 @@ var _ ephemeral.EphemeralResource = &SecretEphemeralResource{}
 
 // SecretEphemeralResource reads a single secret from gopass.
 type SecretEphemeralResource struct {
-	config *ProviderConfig
+	client *GopassClient
 }
 
 // SecretModel describes the data model.
@@ -42,9 +40,9 @@ func (r *SecretEphemeralResource) Schema(ctx context.Context, req ephemeral.Sche
 	resp.Schema = schema.Schema{
 		Description: "Reads a single secret value from the gopass store.",
 		MarkdownDescription: `
-Reads a single secret value from the gopass store.
+Reads a single secret value from the gopass store using the native gopass library.
 
-The secret is retrieved during each Terraform operation and is **never stored** 
+The secret is retrieved during each Terraform operation and is **never stored**
 in state or plan files.
 
 ## Example Usage
@@ -63,7 +61,7 @@ provider "example" {
 ## GPG/Hardware Token
 
 If your gopass store is encrypted with a hardware token (YubiKey, Nitrokey, etc.),
-you will be prompted for PIN entry and/or touch confirmation during each 
+you will be prompted for PIN entry and/or touch confirmation during each
 Terraform operation that accesses the secret.
 `,
 		Attributes: map[string]schema.Attribute{
@@ -73,8 +71,8 @@ Terraform operation that accesses the secret.
 				Required:            true,
 			},
 			"value": schema.StringAttribute{
-				Description:         "The secret value. Only the first line is returned (password convention).",
-				MarkdownDescription: "The secret value. Only the first line is returned (password convention).",
+				Description:         "The secret value (password/first line of the secret).",
+				MarkdownDescription: "The secret value (password/first line of the secret).",
 				Computed:            true,
 				Sensitive:           true,
 			},
@@ -83,21 +81,20 @@ Terraform operation that accesses the secret.
 }
 
 func (r *SecretEphemeralResource) Configure(ctx context.Context, req ephemeral.ConfigureRequest, resp *ephemeral.ConfigureResponse) {
-	// Get provider config if available
 	if req.ProviderData == nil {
 		return
 	}
 
-	config, ok := req.ProviderData.(*ProviderConfig)
+	client, ok := req.ProviderData.(*GopassClient)
 	if !ok {
 		resp.Diagnostics.AddError(
 			"Unexpected Provider Data",
-			fmt.Sprintf("Expected *ProviderConfig, got: %T", req.ProviderData),
+			fmt.Sprintf("Expected *GopassClient, got: %T", req.ProviderData),
 		)
 		return
 	}
 
-	r.config = config
+	r.client = client
 }
 
 func (r *SecretEphemeralResource) Open(ctx context.Context, req ephemeral.OpenRequest, resp *ephemeral.OpenResponse) {
@@ -110,46 +107,19 @@ func (r *SecretEphemeralResource) Open(ctx context.Context, req ephemeral.OpenRe
 	}
 
 	path := data.Path.ValueString()
+
 	tflog.Debug(ctx, "Reading secret from gopass", map[string]interface{}{
 		"path": path,
 	})
 
-	// Determine gopass binary
-	gopassBin := "gopass"
-	if r.config != nil && r.config.GopassBinary != "" {
-		gopassBin = r.config.GopassBinary
-	}
-
-	// Build command arguments
-	args := []string{"show", "-o"}
-
-	// Add store flag if configured
-	if r.config != nil && r.config.Store != "" {
-		args = append(args, "--store", r.config.Store)
-	}
-
-	args = append(args, path)
-
-	// Execute gopass
-	// Note: This may trigger GPG agent / hardware token interaction
-	cmd := exec.CommandContext(ctx, gopassBin, args...)
-	output, err := cmd.Output()
+	// Use native gopass library
+	value, err := r.client.GetSecret(ctx, path)
 	if err != nil {
-		var stderr string
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			stderr = string(exitErr.Stderr)
-		}
 		resp.Diagnostics.AddError(
 			"Failed to read secret",
-			fmt.Sprintf("gopass show failed for path %q: %s\nStderr: %s", path, err.Error(), stderr),
+			fmt.Sprintf("Could not read secret at path %q: %s", path, err.Error()),
 		)
 		return
-	}
-
-	// gopass returns the full secret, we take only the first line (password convention)
-	value := strings.TrimSpace(string(output))
-	if idx := strings.Index(value, "\n"); idx != -1 {
-		value = value[:idx]
 	}
 
 	data.Value = types.StringValue(value)

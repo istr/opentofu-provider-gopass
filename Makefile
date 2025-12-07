@@ -10,7 +10,7 @@ TF_PLUGIN_DIR   = ~/.terraform.d/plugins
 TOFU_PLUGIN_DIR = ~/.local/share/opentofu/plugins
 
 # Registry path for local development
-REGISTRY_PATH = registry.opentofu.org/ingo-struck/gopass/$(VERSION)/$(OS_ARCH)
+REGISTRY_PATH = registry.opentofu.org/istr/gopass/$(VERSION)/$(OS_ARCH)
 
 .PHONY: help build install install-tofu install-tf clean test fmt lint docs
 

@@ -16,7 +16,7 @@ terraform {
 
   required_providers {
     gopass = {
-      source  = "registry.opentofu.org/ingo-struck/gopass"
+      source  = "registry.opentofu.org/istr/gopass"
       version = "~> 0.1"
     }
     scaleway = {
@@ -30,7 +30,7 @@ terraform {
 provider "gopass" {
   # Uncomment to use a specific gopass binary
   # gopass_binary = "/usr/local/bin/gopass"
-  
+
   # Uncomment to use a specific store
   # store = "work"
 }
@@ -57,11 +57,11 @@ provider "scaleway" {
 # ephemeral "gopass_secret" "scw_access_key" {
 #   path = "env/terraform/scaleway/istr/SCW_ACCESS_KEY"
 # }
-# 
+#
 # ephemeral "gopass_secret" "scw_secret_key" {
 #   path = "env/terraform/scaleway/istr/SCW_SECRET_KEY"
 # }
-# 
+#
 # provider "scaleway" {
 #   access_key = ephemeral.gopass_secret.scw_access_key.value
 #   secret_key = ephemeral.gopass_secret.scw_secret_key.value
@@ -73,7 +73,7 @@ provider "scaleway" {
 
 resource "scaleway_object_bucket" "example" {
   name = "my-ephemeral-test-bucket"
-  
+
   tags = {
     managed_by = "opentofu"
     note       = "credentials-not-in-state"
