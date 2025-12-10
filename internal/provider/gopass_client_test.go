@@ -665,3 +665,326 @@ func TestGopassClient_EnsureStore_NonExistentPath(t *testing.T) {
 		t.Errorf("expected specific error message, got %v", err)
 	}
 }
+
+func TestGopassClient_EnsureStore_AlreadyInitialized(t *testing.T) {
+	client := NewGopassClient("")
+	mockStore := newMockStore()
+	client.store = mockStore
+
+	ctx := context.Background()
+
+	// Should return immediately without error since store is already set
+	err := client.ensureStore(ctx)
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+
+	// Store should still be the same
+	if client.store != mockStore {
+		t.Error("store was unexpectedly changed")
+	}
+}
+
+func TestGopassClient_Close_NilStore(t *testing.T) {
+	client := NewGopassClient("")
+	client.store = nil
+
+	ctx := context.Background()
+
+	// Should not panic when store is nil
+	client.Close(ctx)
+
+	if client.store != nil {
+		t.Error("store should remain nil")
+	}
+}
+
+func TestGopassClient_Close_WithCloseError(t *testing.T) {
+	client := NewGopassClient("")
+	mockStore := newMockStore()
+	mockStore.shouldFail = true
+	mockStore.failMsg = "close error"
+	client.store = mockStore
+
+	ctx := context.Background()
+
+	// Should not panic even if Close fails (it just logs warning)
+	client.Close(ctx)
+
+	// Store should still be set to nil after Close
+	if client.store != nil {
+		t.Error("store should be nil after Close")
+	}
+}
+
+func TestGopassClient_GetSecretFull_NotFound(t *testing.T) {
+	client := NewGopassClient("")
+	mockStore := newMockStore()
+	client.store = mockStore
+
+	ctx := context.Background()
+
+	_, _, err := client.GetSecretFull(ctx, "nonexistent")
+	if err == nil {
+		t.Error("expected error but got none")
+	}
+
+	if !strings.Contains(err.Error(), "failed to get secret") {
+		t.Errorf("expected wrapped error, got %v", err)
+	}
+}
+
+func TestGopassClient_ListSecrets_Error(t *testing.T) {
+	client := NewGopassClient("")
+	mockStore := newMockStore()
+	mockStore.shouldFail = true
+	mockStore.failMsg = "list error"
+	client.store = mockStore
+
+	ctx := context.Background()
+
+	_, err := client.ListSecrets(ctx, "test/prefix")
+	if err == nil {
+		t.Error("expected error but got none")
+	}
+
+	if !strings.Contains(err.Error(), "failed to list secrets") {
+		t.Errorf("expected wrapped error, got %v", err)
+	}
+}
+
+// mockStoreWithSelectiveFailure allows failing only specific operations
+type mockStoreWithSelectiveFailure struct {
+	*mockStore
+	failOnGet map[string]bool
+}
+
+func newMockStoreWithSelectiveFailure() *mockStoreWithSelectiveFailure {
+	return &mockStoreWithSelectiveFailure{
+		mockStore: newMockStore(),
+		failOnGet: make(map[string]bool),
+	}
+}
+
+func (m *mockStoreWithSelectiveFailure) Get(ctx context.Context, name, revision string) (gopass.Secret, error) {
+	if m.failOnGet[name] {
+		return nil, fmt.Errorf("selective failure for %q", name)
+	}
+	return m.mockStore.Get(ctx, name, revision)
+}
+
+func TestGopassClient_GetEnvSecrets_PartialFailure(t *testing.T) {
+	client := NewGopassClient("")
+	mockStore := newMockStoreWithSelectiveFailure()
+	client.store = mockStore
+
+	// Add test secrets
+	secret1 := secrets.New()
+	secret1.SetPassword("value1")
+	mockStore.secrets["env/test/KEY1"] = secret1
+
+	secret2 := secrets.New()
+	secret2.SetPassword("value2")
+	mockStore.secrets["env/test/KEY2"] = secret2
+
+	// Make KEY2 fail when trying to read its value
+	mockStore.failOnGet["env/test/KEY2"] = true
+
+	ctx := context.Background()
+
+	envVars, err := client.GetEnvSecrets(ctx, "env/test")
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+
+	// Should only have KEY1 since KEY2 failed and was skipped
+	if len(envVars) != 1 {
+		t.Errorf("expected 1 env var, got %d", len(envVars))
+	}
+
+	if value, exists := envVars["KEY1"]; !exists || value != "value1" {
+		t.Errorf("expected KEY1=value1, got %v", envVars)
+	}
+}
+
+func TestGopassClient_SecretExists_OtherError(t *testing.T) {
+	client := NewGopassClient("")
+	mockStore := newMockStore()
+	mockStore.shouldFail = true
+	mockStore.failMsg = "database connection error"
+	client.store = mockStore
+
+	ctx := context.Background()
+
+	_, err := client.SecretExists(ctx, "test/secret")
+	if err == nil {
+		t.Error("expected error but got none")
+	}
+
+	if !strings.Contains(err.Error(), "failed to check if secret") {
+		t.Errorf("expected wrapped error, got %v", err)
+	}
+}
+
+func TestGopassClient_GetRevisionCount_EmptyRevisions(t *testing.T) {
+	client := NewGopassClient("")
+	mockStore := newMockStore()
+	client.store = mockStore
+
+	// Add a secret with empty revisions array
+	secret := secrets.New()
+	secret.SetPassword("test")
+	mockStore.secrets["test/secret"] = secret
+	mockStore.revisions["test/secret"] = []string{} // Empty but not nil
+
+	ctx := context.Background()
+
+	count, err := client.GetRevisionCount(ctx, "test/secret")
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+
+	// Should return 1 when revisions array is empty (fallback)
+	if count != 1 {
+		t.Errorf("expected revision count 1, got %d", count)
+	}
+}
+
+func TestGopassClient_GetRevisionCount_OtherError(t *testing.T) {
+	client := NewGopassClient("")
+	mockStore := newMockStore()
+	mockStore.shouldFail = true
+	mockStore.failMsg = "database error"
+	client.store = mockStore
+
+	ctx := context.Background()
+
+	_, err := client.GetRevisionCount(ctx, "test/secret")
+	if err == nil {
+		t.Error("expected error but got none")
+	}
+
+	if !strings.Contains(err.Error(), "failed to check if secret") {
+		t.Errorf("expected wrapped error, got %v", err)
+	}
+}
+
+// mockStoreReturningNilSecret returns nil secret without error
+type mockStoreReturningNilSecret struct {
+	*mockStore
+}
+
+func (m *mockStoreReturningNilSecret) Get(ctx context.Context, name, revision string) (gopass.Secret, error) {
+	// Return nil without error - edge case
+	return nil, nil
+}
+
+func TestGopassClient_GetRevisionCount_NilSecret(t *testing.T) {
+	client := NewGopassClient("")
+	mockStore := &mockStoreReturningNilSecret{mockStore: newMockStore()}
+	client.store = mockStore
+
+	ctx := context.Background()
+
+	count, err := client.GetRevisionCount(ctx, "test/secret")
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+
+	// Should return 0 when secret is nil
+	if count != 0 {
+		t.Errorf("expected revision count 0, got %d", count)
+	}
+}
+
+// Test ensureStore error propagation for all methods
+// These tests use a non-existent path to trigger ensureStore failure
+
+func TestGopassClient_GetSecret_EnsureStoreError(t *testing.T) {
+	client := NewGopassClient("/nonexistent/path/for/test")
+	// store is nil, ensureStore will be called and fail
+
+	ctx := context.Background()
+
+	_, err := client.GetSecret(ctx, "test/secret")
+	if err == nil {
+		t.Error("expected error but got none")
+	}
+}
+
+func TestGopassClient_GetSecretFull_EnsureStoreError(t *testing.T) {
+	client := NewGopassClient("/nonexistent/path/for/test")
+
+	ctx := context.Background()
+
+	_, _, err := client.GetSecretFull(ctx, "test/secret")
+	if err == nil {
+		t.Error("expected error but got none")
+	}
+}
+
+func TestGopassClient_ListSecrets_EnsureStoreError(t *testing.T) {
+	client := NewGopassClient("/nonexistent/path/for/test")
+
+	ctx := context.Background()
+
+	_, err := client.ListSecrets(ctx, "test/prefix")
+	if err == nil {
+		t.Error("expected error but got none")
+	}
+}
+
+func TestGopassClient_GetEnvSecrets_ListError(t *testing.T) {
+	client := NewGopassClient("/nonexistent/path/for/test")
+
+	ctx := context.Background()
+
+	_, err := client.GetEnvSecrets(ctx, "test/prefix")
+	if err == nil {
+		t.Error("expected error but got none")
+	}
+}
+
+func TestGopassClient_SetSecret_EnsureStoreError(t *testing.T) {
+	client := NewGopassClient("/nonexistent/path/for/test")
+
+	ctx := context.Background()
+
+	err := client.SetSecret(ctx, "test/secret", "password")
+	if err == nil {
+		t.Error("expected error but got none")
+	}
+}
+
+func TestGopassClient_RemoveSecret_EnsureStoreError(t *testing.T) {
+	client := NewGopassClient("/nonexistent/path/for/test")
+
+	ctx := context.Background()
+
+	err := client.RemoveSecret(ctx, "test/secret")
+	if err == nil {
+		t.Error("expected error but got none")
+	}
+}
+
+func TestGopassClient_SecretExists_EnsureStoreError(t *testing.T) {
+	client := NewGopassClient("/nonexistent/path/for/test")
+
+	ctx := context.Background()
+
+	_, err := client.SecretExists(ctx, "test/secret")
+	if err == nil {
+		t.Error("expected error but got none")
+	}
+}
+
+func TestGopassClient_GetRevisionCount_EnsureStoreError(t *testing.T) {
+	client := NewGopassClient("/nonexistent/path/for/test")
+
+	ctx := context.Background()
+
+	_, err := client.GetRevisionCount(ctx, "test/secret")
+	if err == nil {
+		t.Error("expected error but got none")
+	}
+}
