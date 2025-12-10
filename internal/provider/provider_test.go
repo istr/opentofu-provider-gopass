@@ -136,6 +136,55 @@ func TestProviderConfigure_WithStorePath(t *testing.T) {
 	}
 }
 
+func TestProvider_Metadata(t *testing.T) {
+	ctx := context.Background()
+	p := &GopassProvider{version: "0.1.0"}
+
+	req := provider.MetadataRequest{}
+	resp := &provider.MetadataResponse{}
+
+	p.Metadata(ctx, req, resp)
+
+	if resp.TypeName != "gopass" {
+		t.Errorf("expected TypeName 'gopass', got %q", resp.TypeName)
+	}
+	if resp.Version != "0.1.0" {
+		t.Errorf("expected Version '0.1.0', got %q", resp.Version)
+	}
+}
+
+func TestProvider_Resources(t *testing.T) {
+	ctx := context.Background()
+	p := &GopassProvider{version: "test"}
+
+	resources := p.Resources(ctx)
+
+	if len(resources) == 0 {
+		t.Error("expected at least one resource")
+	}
+}
+
+func TestProvider_DataSources(t *testing.T) {
+	ctx := context.Background()
+	p := &GopassProvider{version: "test"}
+
+	dataSources := p.DataSources(ctx)
+
+	// May be empty if no data sources defined
+	_ = dataSources
+}
+
+func TestProvider_EphemeralResources(t *testing.T) {
+	ctx := context.Background()
+	p := &GopassProvider{version: "test"}
+
+	ephemeralResources := p.EphemeralResources(ctx)
+
+	if len(ephemeralResources) == 0 {
+		t.Error("expected at least one ephemeral resource")
+	}
+}
+
 func TestGopassClient_NewGopassClient(t *testing.T) {
 	// Test with empty path
 	client := NewGopassClient("")
