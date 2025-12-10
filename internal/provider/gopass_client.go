@@ -187,7 +187,8 @@ func (c *GopassClient) GetSecret(ctx context.Context, path string) (string, erro
 // GetSecretFull retrieves a secret with all its key-value pairs.
 // Returns the password and a map of additional fields.
 func (c *GopassClient) GetSecretFull(ctx context.Context, path string) (password string, fields map[string]string, err error) {
-	if err := c.ensureStore(ctx); err != nil {
+	err = c.ensureStore(ctx)
+	if err != nil {
 		return "", nil, err
 	}
 
@@ -291,7 +292,7 @@ func (c *GopassClient) GetEnvSecrets(ctx context.Context, prefix string) (map[st
 
 // SetSecret writes a secret to the gopass store.
 // The value becomes the first line (password) of the secret.
-func (c *GopassClient) SetSecret(ctx context.Context, path string, value string) error {
+func (c *GopassClient) SetSecret(ctx context.Context, path, value string) error {
 	if err := c.ensureStore(ctx); err != nil {
 		return err
 	}
@@ -345,6 +346,11 @@ func (c *GopassClient) SecretExists(ctx context.Context, path string) (bool, err
 
 	exists, err := c.store.Get(ctx, path, "latest")
 	if err != nil {
+		// If the error indicates the secret doesn't exist, that's not an error condition
+		// for this function - it just means the secret doesn't exist
+		if strings.Contains(err.Error(), "not found") {
+			return false, nil
+		}
 		return false, fmt.Errorf("failed to check if secret %q exists: %w", path, err)
 	}
 
@@ -369,6 +375,11 @@ func (c *GopassClient) GetRevisionCount(ctx context.Context, path string) (int64
 	// First check if secret exists
 	exists, err := c.store.Get(ctx, path, "latest")
 	if err != nil {
+		// If the error indicates the secret doesn't exist, that's not an error condition
+		// for this function - it just means the secret doesn't exist
+		if strings.Contains(err.Error(), "not found") {
+			return 0, nil
+		}
 		return 0, fmt.Errorf("failed to check if secret %q exists: %w", path, err)
 	}
 	if exists == nil {

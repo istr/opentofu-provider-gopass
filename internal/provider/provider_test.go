@@ -8,19 +8,9 @@ import (
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-framework/provider"
-	"github.com/hashicorp/terraform-plugin-framework/providerserver"
 	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
-	"github.com/hashicorp/terraform-plugin-go/tfprotov6"
 	"github.com/hashicorp/terraform-plugin-go/tftypes"
 )
-
-// testAccProtoV6ProviderFactories are used to instantiate a provider during
-// acceptance testing. The factory function will be invoked for every Terraform
-// CLI command executed to create a provider server to which the CLI can
-// reattach.
-var testAccProtoV6ProviderFactories = map[string]func() (tfprotov6.ProviderServer, error){
-	"gopass": providerserver.NewProtocol6WithError(New("test")()),
-}
 
 func TestProvider(t *testing.T) {
 	// Basic provider instantiation test
@@ -151,15 +141,20 @@ func TestGopassClient_NewGopassClient(t *testing.T) {
 	client := NewGopassClient("")
 	if client == nil {
 		t.Fatal("NewGopassClient returned nil")
+		return
 	}
 	if client.storePath != "" {
 		t.Errorf("Expected empty storePath, got '%s'", client.storePath)
 	}
 
 	// Test with path
-	client = NewGopassClient("/test/path")
-	if client.storePath != "/test/path" {
-		t.Errorf("Expected storePath '/test/path', got '%s'", client.storePath)
+	client2 := NewGopassClient("/test/path")
+	if client2 == nil {
+		t.Fatal("NewGopassClient returned nil")
+		return
+	}
+	if client2.storePath != "/test/path" {
+		t.Errorf("Expected storePath '/test/path', got '%s'", client2.storePath)
 	}
 }
 

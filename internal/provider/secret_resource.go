@@ -173,6 +173,7 @@ func (r *SecretResource) Configure(ctx context.Context, req resource.ConfigureRe
 	r.client = client
 }
 
+//nolint:gocritic // hugeParam: Terraform framework interface requirement
 func (r *SecretResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
 	var data SecretResourceModel
 
@@ -232,6 +233,7 @@ func (r *SecretResource) Create(ctx context.Context, req resource.CreateRequest,
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }
 
+//nolint:gocritic // hugeParam: Terraform framework interface requirement
 func (r *SecretResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
 	var data SecretResourceModel
 
@@ -271,7 +273,7 @@ func (r *SecretResource) Read(ctx context.Context, req resource.ReadRequest, res
 		})
 	} else {
 		storedRevCount := data.RevisionCount.ValueInt64()
-		
+
 		// Only warn if we have a meaningful comparison
 		// (storedRevCount > 0 means we had a previous count, currentRevCount > 1 means versioning is supported)
 		if storedRevCount > 0 && currentRevCount > storedRevCount {
@@ -286,7 +288,7 @@ func (r *SecretResource) Read(ctx context.Context, req resource.ReadRequest, res
 				),
 			)
 		}
-		
+
 		// Update stored revision count
 		data.RevisionCount = types.Int64Value(currentRevCount)
 	}
@@ -295,6 +297,7 @@ func (r *SecretResource) Read(ctx context.Context, req resource.ReadRequest, res
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }
 
+//nolint:gocritic // hugeParam: Terraform framework interface requirement
 func (r *SecretResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
 	var data SecretResourceModel
 	var state SecretResourceModel
@@ -365,6 +368,7 @@ func (r *SecretResource) Update(ctx context.Context, req resource.UpdateRequest,
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }
 
+//nolint:gocritic // hugeParam: Terraform framework interface requirement
 func (r *SecretResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
 	var data SecretResourceModel
 

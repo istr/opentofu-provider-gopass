@@ -1,0 +1,58 @@
+#!/bin/bash
+
+# Terraform Provider Go Pre-commit Hook
+# This hook runs linting and testing before allowing a commit
+
+set -e
+
+echo "Running pre-commit checks..."
+
+# Check if golangci-lint is available
+if ! command -v golangci-lint &> /dev/null; then
+    echo "Warning: golangci-lint not found. Skipping linting."
+    echo "Install with: curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b \$(go env GOPATH)/bin"
+else
+    echo "Running golangci-lint..."
+    golangci-lint run ./...
+    if [ $? -ne 0 ]; then
+        echo "❌ Linting failed. Please fix the issues before committing."
+        exit 1
+    fi
+    echo "✓ Linting passed"
+fi
+
+# Run go fmt check
+echo "Checking formatting..."
+UNFORMATTED=$(gofmt -l .)
+if [ -n "$UNFORMATTED" ]; then
+    echo "❌ The following files are not formatted:"
+    echo "$UNFORMATTED"
+    echo "Run 'gofmt -w .' to format them."
+    exit 1
+fi
+echo "✓ Formatting check passed"
+
+# Run tests
+echo "Running tests..."
+go test -v ./internal/provider/... > /dev/null 2>&1
+if [ $? -ne 0 ]; then
+    echo "❌ Tests failed. Please fix failing tests before committing."
+    go test -v ./internal/provider/...
+    exit 1
+fi
+echo "✓ Tests passed"
+
+# Check test coverage
+echo "Checking test coverage..."
+COVERAGE=$(go test -coverprofile=coverage.out ./internal/provider/... 2>/dev/null | grep "coverage:" | awk '{print $5}' | sed 's/%//')
+if [ -n "$COVERAGE" ]; then
+    echo "Current test coverage: ${COVERAGE}%"
+    # Optional: fail if coverage is too low
+    # THRESHOLD=50
+    # if (( $(echo "$COVERAGE < $THRESHOLD" | bc -l) )); then
+    #     echo "❌ Test coverage ${COVERAGE}% is below threshold ${THRESHOLD}%"
+    #     exit 1
+    # fi
+fi
+
+echo "✅ All pre-commit checks passed!"

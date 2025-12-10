@@ -70,14 +70,13 @@ func TestSecretResource_Schema(t *testing.T) {
 func TestSecretResource_ImplementsInterfaces(t *testing.T) {
 	r := NewSecretResource()
 
-	// Check Resource interface
-	_, ok := r.(resource.Resource)
-	if !ok {
-		t.Error("SecretResource does not implement resource.Resource")
+	// Check that it implements resource.Resource
+	if r == nil {
+		t.Error("NewSecretResource returned nil")
 	}
 
 	// Check ResourceWithConfigure interface
-	_, ok = r.(resource.ResourceWithConfigure)
+	_, ok := r.(resource.ResourceWithConfigure)
 	if !ok {
 		t.Error("SecretResource does not implement resource.ResourceWithConfigure")
 	}
