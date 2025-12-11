@@ -139,12 +139,8 @@ func (r *EnvEphemeralResource) Open(ctx context.Context, req ephemeral.OpenReque
 	}
 
 	// Convert to types.Map
-	mapValue, diags := types.MapValueFrom(ctx, types.StringType, values)
-	resp.Diagnostics.Append(diags...)
-	if resp.Diagnostics.HasError() {
-		return
-	}
-
+	// types.MapValueFrom with types.StringType and map[string]string is guaranteed to succeed
+	mapValue, _ := types.MapValueFrom(ctx, types.StringType, values)
 	data.Values = mapValue
 
 	// Set result - NEVER written to state

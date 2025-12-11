@@ -432,3 +432,105 @@ func TestEnvEphemeralResource_Open_Empty(t *testing.T) {
 		t.Errorf("unexpected error: %v", resp.Diagnostics)
 	}
 }
+
+func TestEnvEphemeralResource_Open_GetEnvSecretsError(t *testing.T) {
+	r := &EnvEphemeralResource{}
+	mockStore := newMockStore()
+	mockStore.shouldFail = true
+	mockStore.failMsg = "list error"
+	client := NewGopassClient("")
+	client.store = mockStore
+	r.client = client
+
+	ctx := context.Background()
+	schemaReq := ephemeral.SchemaRequest{}
+	schemaResp := &ephemeral.SchemaResponse{}
+	r.Schema(ctx, schemaReq, schemaResp)
+
+	configValue := tftypes.NewValue(tftypes.Object{
+		AttributeTypes: map[string]tftypes.Type{
+			"path":   tftypes.String,
+			"values": tftypes.Map{ElementType: tftypes.String},
+		},
+	}, map[string]tftypes.Value{
+		"path":   tftypes.NewValue(tftypes.String, "env/test"),
+		"values": tftypes.NewValue(tftypes.Map{ElementType: tftypes.String}, nil),
+	})
+
+	resultRaw := tftypes.NewValue(tftypes.Object{
+		AttributeTypes: map[string]tftypes.Type{
+			"path":   tftypes.String,
+			"values": tftypes.Map{ElementType: tftypes.String},
+		},
+	}, nil)
+
+	req := ephemeral.OpenRequest{
+		Config: tfsdk.Config{
+			Schema: schemaResp.Schema,
+			Raw:    configValue,
+		},
+	}
+	resp := &ephemeral.OpenResponse{
+		Result: tfsdk.EphemeralResultData{
+			Schema: schemaResp.Schema,
+			Raw:    resultRaw,
+		},
+	}
+
+	r.Open(ctx, req, resp)
+
+	// Should have an error since GetEnvSecrets failed
+	if !resp.Diagnostics.HasError() {
+		t.Error("expected error for GetEnvSecrets failure")
+	}
+}
+
+func TestEnvEphemeralResource_Open_ConfigGetError(t *testing.T) {
+	r := &EnvEphemeralResource{}
+	client := NewGopassClient("")
+	r.client = client
+
+	ctx := context.Background()
+	schemaReq := ephemeral.SchemaRequest{}
+	schemaResp := &ephemeral.SchemaResponse{}
+	r.Schema(ctx, schemaReq, schemaResp)
+
+	// Create a mismatched schema/value combination to trigger Config.Get error
+	// Use a wrong type in the raw value that doesn't match the schema
+	wrongConfigValue := tftypes.NewValue(tftypes.Object{
+		AttributeTypes: map[string]tftypes.Type{
+			"path":   tftypes.Number, // Wrong type - schema expects String
+			"values": tftypes.Map{ElementType: tftypes.String},
+		},
+	}, map[string]tftypes.Value{
+		"path":   tftypes.NewValue(tftypes.Number, 123), // Wrong type
+		"values": tftypes.NewValue(tftypes.Map{ElementType: tftypes.String}, nil),
+	})
+
+	resultRaw := tftypes.NewValue(tftypes.Object{
+		AttributeTypes: map[string]tftypes.Type{
+			"path":   tftypes.String,
+			"values": tftypes.Map{ElementType: tftypes.String},
+		},
+	}, nil)
+
+	req := ephemeral.OpenRequest{
+		Config: tfsdk.Config{
+			Schema: schemaResp.Schema,
+			Raw:    wrongConfigValue,
+		},
+	}
+	resp := &ephemeral.OpenResponse{
+		Result: tfsdk.EphemeralResultData{
+			Schema: schemaResp.Schema,
+			Raw:    resultRaw,
+		},
+	}
+
+	r.Open(ctx, req, resp)
+
+	// Should have an error since Config.Get failed due to type mismatch
+	if !resp.Diagnostics.HasError() {
+		t.Error("expected error for Config.Get failure due to type mismatch")
+	}
+}
