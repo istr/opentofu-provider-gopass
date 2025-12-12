@@ -20,9 +20,11 @@ import (
 // GopassClient wraps the gopass library for secret access.
 // It maintains a single store instance for the lifetime of the provider.
 type GopassClient struct {
-	store     gopass.Store
-	storePath string
-	mu        sync.Mutex
+	store       gopass.Store
+	storePath   string
+	mu          sync.Mutex
+	userHomeDir func() (string, error)                          // injectable for testing
+	apiNew      func(ctx context.Context) (gopass.Store, error) // injectable for testing
 }
 
 // NewGopassClient creates a new gopass client.
@@ -30,7 +32,9 @@ type GopassClient struct {
 // If storePath is non-empty, it will be used instead of the default gopass configuration.
 func NewGopassClient(storePath string) *GopassClient {
 	return &GopassClient{
-		storePath: storePath,
+		storePath:   storePath,
+		userHomeDir: os.UserHomeDir,
+		apiNew:      func(ctx context.Context) (gopass.Store, error) { return api.New(ctx) },
 	}
 }
 
@@ -53,7 +57,7 @@ func (c *GopassClient) ensureStore(ctx context.Context) error {
 		// Expand ~ if present
 		expandedPath := c.storePath
 		if strings.HasPrefix(expandedPath, "~/") {
-			home, err := os.UserHomeDir()
+			home, err := c.userHomeDir()
 			if err != nil {
 				return fmt.Errorf("failed to expand home directory: %w", err)
 			}
@@ -73,7 +77,7 @@ func (c *GopassClient) ensureStore(ctx context.Context) error {
 		os.Setenv("PASSWORD_STORE_DIR", expandedPath)
 	}
 
-	store, err := api.New(ctx)
+	store, err := c.apiNew(ctx)
 	if err != nil {
 		// Provide helpful error message
 		return c.wrapStoreError(err)

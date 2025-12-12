@@ -666,6 +666,31 @@ func TestGopassClient_EnsureStore_NonExistentPath(t *testing.T) {
 	}
 }
 
+func TestGopassClient_EnsureStore_UserHomeDirError(t *testing.T) {
+	// Create client with tilde path to trigger home expansion
+	client := NewGopassClient("~/some/path")
+
+	// Inject a failing userHomeDir function
+	client.userHomeDir = func() (string, error) {
+		return "", errors.New("simulated home directory lookup failure")
+	}
+
+	ctx := context.Background()
+
+	err := client.ensureStore(ctx)
+	if err == nil {
+		t.Error("expected error when userHomeDir fails")
+	}
+
+	if !strings.Contains(err.Error(), "failed to expand home directory") {
+		t.Errorf("expected 'failed to expand home directory' error, got %v", err)
+	}
+
+	if !strings.Contains(err.Error(), "simulated home directory lookup failure") {
+		t.Errorf("expected wrapped original error, got %v", err)
+	}
+}
+
 func TestGopassClient_EnsureStore_AlreadyInitialized(t *testing.T) {
 	client := NewGopassClient("")
 	mockStore := newMockStore()
@@ -682,6 +707,36 @@ func TestGopassClient_EnsureStore_AlreadyInitialized(t *testing.T) {
 	// Store should still be the same
 	if client.store != mockStore {
 		t.Error("store was unexpectedly changed")
+	}
+}
+
+func TestGopassClient_EnsureStore_SuccessfulInit(t *testing.T) {
+	// Create client with no store path (uses default gopass config)
+	client := NewGopassClient("")
+
+	// Inject a mock apiNew that returns a simple mock store
+	injectedMockStore := newMockStore()
+	client.apiNew = func(ctx context.Context) (gopass.Store, error) {
+		return injectedMockStore, nil
+	}
+
+	ctx := context.Background()
+
+	// Should successfully initialize the store
+	err := client.ensureStore(ctx)
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+
+	// Store should be set to our injected mock
+	if client.store != injectedMockStore {
+		t.Error("store was not set to the injected mock")
+	}
+
+	// Calling ensureStore again should return immediately (already initialized)
+	err = client.ensureStore(ctx)
+	if err != nil {
+		t.Errorf("unexpected error on second call: %v", err)
 	}
 }
 
